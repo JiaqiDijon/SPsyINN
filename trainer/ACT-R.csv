@@ -1,0 +1,2 @@
+Complexity,Loss,Equation
+7,1,"x0 + log(pow(x1, -2 * x5))"

@@ -1,0 +1,6 @@
+Complexity,Loss,Equation
+7,1,"x0 + log(pow(x1, -2 * x5))"
+8,1,"exp((-2 * x2) / (x2 + x5))"
+9,1,"x3 * pow((1 + x1 * x2), -1 * x0)"
+11,1,"pow(2,(-4 * x1 / pow(2, x2 / x4)))"
+15,1,"x3 * pow((2 + x1 * 2), -1 * x0) * exp(-1 * x1)"
