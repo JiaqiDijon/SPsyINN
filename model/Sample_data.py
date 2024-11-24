@@ -10,22 +10,11 @@ class MyDataset(torch.utils.data.Dataset):
         self.z = z
         self.m = m
 
-    # z 为DKT或SR的预测标签，用来相互影响
     def __getitem__(self, index):
         return self.X[index], self.y[index], self.z[index], self.m[index]
 
     def __len__(self):
         return len(self.X)
-
-
-# def save_DKT_pred(X, y, z, m):
-#     SampleLoaders = DataLoader(MyDataset(X, y, z, m), batch_size=C.BATCH_SIZE, shuffle=True)
-#     torch.save(SampleLoaders, C.Dpath + C.DATASET + '/DKT_Sample_pred.npy')
-#
-#
-# def save_GPSR_pred(X, y, z, m):
-#     SampleLoaders = DataLoader(MyDataset(X, y, z, m), batch_size=C.BATCH_SIZE, shuffle=True)
-#     torch.save(SampleLoaders, C.Dpath + C.DATASET + '/GPSR_Sample_pred.npy')
 
 
 class NewDataste(torch.utils.data.Dataset):
