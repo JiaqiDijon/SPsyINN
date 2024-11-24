@@ -153,14 +153,14 @@ def train(model, trainLoaders, early_stopping, testLoaders):
         Data = torch.cat([Data, data], dim=0)
 
     num_samples = 1024
-    indices = torch.randperm(X.size(0))[:num_samples]  # 生成一个随机排列并取前1024个索引
+    indices = torch.randperm(X.size(0))[:num_samples] 
 
     min = torch.min(Data.reshape(-1, C.INPUT), dim=0)[0]
     max = torch.max(Data.reshape(-1, C.INPUT), dim=0)[0]
 
     X = (X - min) / (max - min)
 
-    X = X[indices]  # 使用随机索引抽取样本
+    X = X[indices]  
     y_sr = y[indices]
     X = torch.nan_to_num(X, 0)
 
@@ -174,7 +174,7 @@ def train(model, trainLoaders, early_stopping, testLoaders):
     test(model, testLoaders, min, max)
 
     model, val_loss = val(model, valLoaders, min, max)
-    # 调用早停机制
+
     early_stopping(val_loss, model)
 
     if early_stopping.early_stop:
@@ -182,20 +182,12 @@ def train(model, trainLoaders, early_stopping, testLoaders):
     model = early_stopping.load_checkpoint()
 
     indices_forDNN = torch.randperm(Data.size(0))[:num_samples]
-    Data = Data[indices_forDNN]  # 使用随机索引抽取样本
+    Data = Data[indices_forDNN]  
     y = y[indices_forDNN]
     Data = (Data - min) / (max - min)
 
     Data = torch.nan_to_num(Data, 0)
-
-    if C.Torch_model_name == 'FIFKT':
-        if 'momo' not in C.DATASET:
-            pred = torch.Tensor([model.predict(Data[:, -1, [3, 5, 6, 8, 9, 10]].cpu().detach().numpy())]).squeeze(
-                0).unsqueeze(1)
-        else:
-            pred = torch.Tensor([model.predict(Data[:, -4, :].cpu().detach().numpy())]).squeeze(0).unsqueeze(1)
-    else:
-        pred = model.predict(Data[:, -1, :])
+    pred = model.predict(Data[:, -1, :])
 
     save_PYSR_pred(Data, y, pred.reshape(pred.shape[0], 1))
     if os.path.exists(C.Dpath + C.DATASET + '/' + C.Torch_model_name + 'NN_pred.npy'):
@@ -204,17 +196,8 @@ def train(model, trainLoaders, early_stopping, testLoaders):
         DKTpred = torch.load(C.Dpath + C.DATASET + '/' + C.Torch_model_name + 'NN_pred.npy')
         for batch_idx, (data, label, dktpred) in enumerate(DKTpred):
             data = torch.nan_to_num(data, 0)
-            if C.Torch_model_name == 'FIFKT':
-                if 'momo' not in C.DATASET:
-                    D = torch.cat([D, data[:, -1, [3, 5, 6, 8, 9, 10]].cpu()], dim=0)
-                    L = torch.cat([L, dktpred.cpu()], dim=0)
-                else:
-                    D = torch.cat([D, data[:, -1, :].cpu()], dim=0)
-                    L = torch.cat([L, dktpred.cpu()], dim=0)
-            else:
-                D = torch.cat([D, data[:, -1, :].cpu()], dim=0)
-                L = torch.cat([L, dktpred[:, -1, :].cpu()], dim=0)
-
+            D = torch.cat([D, data[:, -1, :].cpu()], dim=0)
+            L = torch.cat([L, dktpred[:, -1, :].cpu()], dim=0)
         model.fit(D.cpu().detach().numpy(), L.cpu().detach().numpy())
 
     return model, min, max
@@ -230,18 +213,9 @@ def val(model, valLoaders, min, max):
         data = (data - min) / (max - min)
         data = data[:, -1, :]
         data = torch.nan_to_num(data, 0)
-        if C.Torch_model_name == 'FIFKT':
-            if 'momo' not in C.DATASET:
-                pred = torch.Tensor([model.predict(data[:, [3, 5, 6, 8, 9, 10]].cpu().detach().numpy())]).squeeze(
-                    0).unsqueeze(1)
-            else:
-                pred = torch.Tensor([model.predict(data.cpu().detach().numpy())]).squeeze(0).unsqueeze(1)
-        else:
-            pred = torch.Tensor([model.predict(data.cpu().detach().numpy())]).squeeze(0).unsqueeze(
-                1)  # .reshape(prediction.shape[1], prediction.shape[0])
+        pred = torch.Tensor([model.predict(data.cpu().detach().numpy())]).squeeze(0).unsqueeze(1)  # .reshape(prediction.shape[1], prediction.shape[0])
         prediction = torch.cat([prediction, pred], dim=0)
 
-    # 计算验证损失
     val_loss = torch.nn.functional.mse_loss(prediction, y)
     return model, val_loss.item()
 
@@ -254,13 +228,7 @@ def test(model, testLoaders, min, max, last=False):
         data = (data - min) / (max - min)
         ground_truth = torch.cat([ground_truth, label.cpu()])
         data = torch.nan_to_num(data, 0)
-        if C.Torch_model_name == 'FIFKT':
-            if 'momo' not in C.DATASET:
-                SR_pred = torch.Tensor([model.predict(data[:, [3, 5, 6, 8, 9, 10]].cpu().detach().numpy())])
-            else:
-                SR_pred = torch.Tensor([model.predict(data.cpu().detach().numpy())])
-        else:
-            SR_pred = torch.Tensor([model.predict(data.cpu().detach().numpy())])
+        SR_pred = torch.Tensor([model.predict(data.cpu().detach().numpy())])
         prediction = torch.cat([prediction, SR_pred.squeeze(0).unsqueeze(1)], dim=0)
 
     print(prediction.max())
@@ -281,10 +249,7 @@ def test(model, testLoaders, min, max, last=False):
 #         print(f"Error reading ALL.csv: {e}")
 #         raise
 #
-#     # 确保读取成功后，将数据写入 equcation.csv 文件，替换原有内容
 #     e_df.to_csv('equcation.csv', index=False)
-#
-#     print(f"{C.functionlist[C.Function]}的数据已成功写入 equcation.csv 文件中，原有内容已被替换。")
 #
 #     print('Dataset: ' + C.DATASET + ', Learning Rate: ' + str(C.LR) + '\n')
 #     model = PySRRegressor(
@@ -301,7 +266,7 @@ def test(model, testLoaders, min, max, last=False):
 #         loss="L2DistLoss()",
 #         maxsize=10,
 #         warm_start=True,
-#         maxdepth=4,  # 避免深度嵌套
+#         maxdepth=4, 
 #         procs=20,
 #         annealing=True,
 #         alpha=0.1,
@@ -315,8 +280,6 @@ def test(model, testLoaders, min, max, last=False):
 #         early_stop_condition="stop_if(loss, complexity) = loss < 1e-6 && complexity < 10"
 #     )
 #     trainLoaders, valLoaders, testLoaders = getLoader()
-#
-#     # 初始化早停机制
 #     early_stopping = EarlyStopping(patience=5, verbose=True)
 #
 #     for epoch in tqdm.tqdm(range(C.EPOCH), 'training...'):
@@ -339,7 +302,6 @@ def test(model, testLoaders, min, max, last=False):
 #         else:
 #             time.sleep(0)
 #
-#     # 训练结束后，加载最佳模型
 #     model = early_stopping.load_checkpoint()
 #     print("Loaded best model")
 #     ground_truth, prediction = test(model, testLoaders, min, max, last=True)
