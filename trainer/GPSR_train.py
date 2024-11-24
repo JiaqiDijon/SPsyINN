@@ -13,17 +13,14 @@ from model.GPSR_Model import train, test, EarlyStopping,save_epoch
 
 if __name__ == '__main__':
 
-    # 尝试读取 ALL.csv 文件
     try:
         e_df = pd.read_csv(C.functionlist[C.Function])
     except pd.errors.ParserError as e:
         print(f"Error reading ALL.csv: {e}")
         raise
 
-    # 确保读取成功后，将数据写入 equcation.csv 文件，替换原有内容
     e_df.to_csv('equcation.csv', index=False)
 
-    print(f"{C.functionlist[C.Function]}的数据已成功写入 equcation.csv 文件中，原有内容已被替换。")
 
     print('Dataset: ' + C.DATASET + ', Learning Rate: ' + str(C.LR) + '\n')
     model = PySRRegressor(
@@ -40,7 +37,7 @@ if __name__ == '__main__':
         loss="L2DistLoss()",
         maxsize=10,
         warm_start=True,
-        maxdepth=4,  # 避免深度嵌套
+        maxdepth=4,  
         procs=20,
         annealing=True,
         alpha=0.1,
@@ -55,7 +52,6 @@ if __name__ == '__main__':
     )
     trainLoaders, valLoaders, testLoaders = getLoader()
 
-    # 初始化早停机制
     early_stopping = EarlyStopping(patience=5, verbose=True)
 
     for epoch in tqdm.tqdm(range(C.EPOCH), 'training...'):
@@ -78,7 +74,6 @@ if __name__ == '__main__':
         else:
             time.sleep(0)
 
-    # 训练结束后，加载最佳模型
     model = early_stopping.load_checkpoint()
     print("Loaded best model")
     ground_truth, prediction = test(model, testLoaders, min, max, last=True)
