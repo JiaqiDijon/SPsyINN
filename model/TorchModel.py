@@ -130,114 +130,6 @@ class DTKT(nn.Module):
 
         return out_original, out_noisy
 
-
-class FIFAKT(nn.Module):
-    def __init__(self, n_question, p_num, embed_l, embed_p, hidden_dim, input_size, layer_dim=1, class_weights=None,
-                 final_fc_dim=512, dropout=0.0, z_weight=0.0, pretrained_embeddings=None, freeze_pretrained=True):
-        super(FIFAKT, self).__init__()
-        self.hidden_dim = hidden_dim
-        self.dropout = dropout
-        self.z_weight = z_weight
-        self.class_weights = class_weights
-        self.n_question = n_question
-        self.p_num = p_num
-        self.layer_dim = layer_dim
-        self.input_size = input_size
-
-        # pretrained_embeddings=None
-        if pretrained_embeddings is not None:
-            print("embeddings frozen:", freeze_pretrained, flush=True)
-            self.q_embed = nn.Embedding.from_pretrained(pretrained_embeddings, padding_idx=0, freeze=freeze_pretrained)
-        else:
-            self.q_embed = nn.Embedding(self.n_question, embed_l, padding_idx=0)
-            self.p_embed = nn.Embedding(self.p_num, embed_p, padding_idx=0)
-        num_features = self.input_size
-        if 'momo' in C.DATASET:
-            self.rnn = nn.LSTM(
-                input_size=embed_l + embed_p + 6 + num_features,  # 181
-                hidden_size=self.hidden_dim,
-                num_layers=self.layer_dim,
-            )
-            self.out = nn.Sequential(
-                nn.Linear(270, 64),
-                nn.Tanh(),
-                nn.Dropout(0.3),
-                nn.Linear(64, 10),
-                nn.Tanh(),
-                nn.Dropout(0.3),
-                nn.Linear(10, 1),
-            )
-        else:
-            self.rnn = nn.LSTM(
-                input_size=embed_l + embed_p + 11 + num_features,  # 186
-                hidden_size=self.hidden_dim,
-                num_layers=self.layer_dim,
-            )
-            self.out = nn.Sequential(
-                nn.Linear(275, 64),
-                nn.Tanh(),
-                nn.Dropout(0.3),
-                nn.Linear(64, 10),
-                nn.Tanh(),
-                nn.Dropout(0.3),
-                nn.Linear(10, 1),
-            )
-        self.sig = nn.Sigmoid()
-
-    def attention_net_q(self, q_context, state, l):
-        # hidden = final_state.view(-1, self.hidden_dim , 1)   # hidden : [batch_size, n_hidden * num_directions(=2), 1(=n_layer)]
-        q_context_t = q_context.transpose(1, 2)
-
-        attn_weights_o = torch.bmm(q_context, q_context_t).squeeze(2)  # attn_weights : [batch_size, n_step]
-
-        attn_weights = attn_weights_o[:, :, :]
-        scaled_attn_weights = torch.divide(attn_weights, math.sqrt(l))
-        scaled_attn_weights = torch.triu(scaled_attn_weights)
-        scaled_attn_weights[scaled_attn_weights == 0] = -1000
-
-        soft_attn_weights = F.softmax(scaled_attn_weights, dim=-2)
-        soft_attn_weights = torch.triu(soft_attn_weights)
-        context = torch.bmm(state.transpose(1, 2), soft_attn_weights).squeeze(2)
-
-        context = context.transpose(1, 2)
-
-        return context, soft_attn_weights.data
-
-    def forward(self, data):
-
-        data_x, data_y = data[:-1, :, :], data[-1, :, :]
-
-        # word embeding
-        q_data = data_x[:, :, 4].unsqueeze(-1)
-        q_embed_data = self.q_embed(
-            q_data.to(dtype=torch.long)).squeeze()  # input : [batch_size, len_seq, embedding_dim]
-        # user embeding
-        p_data = data_x[:, :, 0].unsqueeze(-1)
-        p_embed_data = self.p_embed(p_data.to(dtype=torch.long)).squeeze()
-        batch_size, sl = data_x.size(1), data_x.size(0)
-        hidden_state = Variable(torch.zeros(self.layer_dim, batch_size, self.hidden_dim,
-                                            device=device))  # [num_layers(=1) * num_directions(=2), batch_size, n_hidden]
-        cell_state = Variable(torch.zeros(self.layer_dim, batch_size, self.hidden_dim,
-                                          device=device))  # [num_layers(=1) * num_directions(=2), batch_size, n_hidden]
-
-        rnn_input = torch.cat([q_embed_data, p_embed_data, data_x, data_y.unsqueeze(0).repeat(data_x.shape[0], 1, 1)],
-                              dim=2)
-
-        output, (final_hidden_state, final_cell_state) = self.rnn(rnn_input, (hidden_state, cell_state))
-
-        att_input = torch.cat([q_embed_data, p_embed_data], dim=2)
-        output = output
-        attn_output, attention = self.attention_net_q(att_input, output, l=len(att_input))
-        ffn_input = torch.cat([attn_output, output[:, :, :], p_embed_data[:, :, :], q_embed_data[:, :, :],
-                               data_y[:, :].unsqueeze(0).repeat(data_x.shape[0], 1, 1)], dim=2)
-        ffn_input = ffn_input.transpose(0, 1)
-        ffn_input = ffn_input[:, -1, :]
-
-        pred = self.out(ffn_input)
-        # pred = self.sig(pred)
-        return pred
-
-
 def Loss(y_true, y_pred_original, y_pred_noisy=None, y_sr=None, weight=False):
     maeloss = nn.L1Loss()
     mseloss = nn.MSELoss()
@@ -247,7 +139,7 @@ def Loss(y_true, y_pred_original, y_pred_noisy=None, y_sr=None, weight=False):
         if y_sr is not None:
             loss_sr = mseloss(y_pred_original, y_sr)
             loss_original = mseloss(y_pred_original, y_true)
-            if C.DyOp:
+            if C.DAO:
                 orginal_true_loss = maeloss(y_pred_original, y_true)
                 sr_true_loss = maeloss(y_sr, y_true)
 
@@ -274,7 +166,7 @@ def Loss(y_true, y_pred_original, y_pred_noisy=None, y_sr=None, weight=False):
         if y_sr is not None:
             loss_sr = mseloss(y_pred_original, y_sr)
             sr_true_loss = maeloss(y_sr, y_true)
-            if C.DyOp:
+            if C.DAO:
                 original_weight = (sr_true_loss + noisy_true_loss) / (
                             sr_true_loss + orginal_true_loss + noisy_true_loss)
                 noisy_weight = (sr_true_loss + orginal_true_loss) / (sr_true_loss + orginal_true_loss + noisy_true_loss)
