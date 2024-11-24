@@ -62,14 +62,12 @@ class DF_block(nn.Module):
         self.alpha = 1 - self.beta
         self.alpha_hat = torch.cumprod(self.alpha, dim=0)
 
-        # 定义去噪模型
         layers = [nn.Linear(input_dim, hidden_dim), nn.ReLU(), nn.Dropout(dropout_prob)]
         for _ in range(num_layers):
             layers += [nn.Linear(hidden_dim, hidden_dim), nn.ReLU(), nn.Dropout(dropout_prob)]
         layers.append(nn.Linear(hidden_dim, input_dim))
         self.denoise_model = nn.Sequential(*layers)
 
-        # 噪声水平作为可学习参数
         self.noise_level = nn.Parameter(torch.tensor(0.5))
 
     def prepare_noise_schedule(self):
@@ -80,18 +78,10 @@ class DF_block(nn.Module):
         alpha_t = self.alpha_hat[t].to(x.device)
         alpha_t_sqrt = torch.sqrt(alpha_t).view(-1, 1, 1)
         noise_t = noise * torch.sqrt(1 - alpha_t).view(-1, 1, 1)
-
-        # 根据可学习的噪声水平调整噪声强度
         noise_t = noise_t * self.noise_level
 
         noisy_data = alpha_t_sqrt * x + noise_t
         return noisy_data.squeeze(0), noise
-
-    def denoise(self, noisy_data, t):
-        alpha_t = self.alpha_hat[t].to(noisy_data.device)
-        alpha_t_sqrt = torch.sqrt(alpha_t).view(-1, 1, 1)
-        noise_pred = self.denoise_model(noisy_data / alpha_t_sqrt)
-        return (noisy_data - noise_pred * torch.sqrt(1 - alpha_t).view(-1, 1, 1)) / alpha_t_sqrt
 
 
 class DTKT(nn.Module):
@@ -122,7 +112,7 @@ class DTKT(nn.Module):
         c0 = Variable(torch.zeros(self.layer_dim, x.shape[0], self.hidden_dim)).to(x.device)
         noisy_data, noise = self.noise_module(x, t=15)
 
-        # 对原始数据的预测
+        # original
         original, (h0, c0) = self.rnn(x, (h0, c0))
         original = self.fc(original)  # 64
         out_original = self.out(original)
@@ -130,7 +120,7 @@ class DTKT(nn.Module):
         out_original = self.Linear(out_original + h)
         out_original = self.sig(out_original)
 
-        # 对添加噪声数据的预测
+        # noisy
         noisy, (h0, c0) = self.rnn(noisy_data, (h0, c0))
         noisy = self.fc(noisy)
         out_noisy = self.out(noisy)
@@ -305,25 +295,6 @@ def Loss(y_true, y_pred_original, y_pred_noisy=None, y_sr=None, weight=False):
                 print(f'original_weight: {original_weight}, noisy_weight: {noisy_weight}')
         return total_loss
 
-    elif C.Torch_model_name == 'FIFKT':
-        if y_sr is not None:
-            loss_sr = mseloss(y_pred_original, y_sr)
-            loss_original = mseloss(y_pred_original, y_true)
-
-            orginal_true_loss = maeloss(y_pred_original, y_true)
-            sr_true_loss = maeloss(y_sr, y_true)
-
-            original_weight = sr_true_loss / (sr_true_loss + orginal_true_loss)
-            sr_weight = orginal_true_loss / (sr_true_loss + orginal_true_loss)
-
-            total_loss = original_weight * loss_original + sr_weight * loss_sr
-            if weight:
-                print(f'original_weight: {original_weight}, sr_weight: {sr_weight}')
-        else:
-            total_loss = mseloss(y_pred_original, y_true)
-        return total_loss
-
-
 def masked_mape(preds, labels, null_val=0):
     with np.errstate(divide='ignore', invalid='ignore'):
         if torch.isnan(torch.tensor(null_val)):
@@ -477,11 +448,6 @@ def train(trainLoaders, val_loader, model, optimizer, early_stopping, epoch, wei
                             weight=weight) + l2_lambda * l2_norm
             else:
                 loss = Loss(label.cpu(), pred_original_mask.cpu(), pred_noisy_mask.cpu()) + l2_lambda * l2_norm
-        if C.Torch_model_name == 'FIFKT':
-            data = data.transpose(0, 1)
-            pred = model(data)
-            loss = Loss(label.cpu().squeeze(), pred[0].cpu().squeeze())
-            data = data.transpose(0, 1)
 
         Data = torch.cat((Data, data), dim=0)
         l = torch.cat((l, label), dim=0)
@@ -502,21 +468,16 @@ def train(trainLoaders, val_loader, model, optimizer, early_stopping, epoch, wei
 
     model.load_state_dict(early_stopping.best_model)
 
-    if C.Training_model == 'Asy-11' or C.Training_model == 'Asy-00':
+    if C.Training_model == 'SPsyINN-W' or C.Training_model == 'SPsyINN-C':
         num_samples = 1024
-        indices = torch.randperm(Data.size(0))[:num_samples]  # 生成一个随机排列并取前1024个索引
+        indices = torch.randperm(Data.size(0))[:num_samples]  
 
-        Data = Data[indices]  # 使用随机索引抽取样本
+        Data = Data[indices]  
         l = l[indices]
         if C.Torch_model_name == 'DTKT':
             pred_original, pred_noisy = model(Data)
         if C.Torch_model_name == 'DKT':
             pred_original = model(Data)
-        if C.Torch_model_name == 'FIFKT':
-            Data = Data.transpose(0, 1)
-            pred_original = model(Data)
-            Data = Data.transpose(0, 1)
-
         save_DKT_pred(Data, l, pred_original)
         if os.path.exists(C.Dpath + C.DATASET + '/' + C.Torch_model_name + 'GPSR_pred.npy'):
             SRpred = torch.load(C.Dpath + C.DATASET + '/' + C.Torch_model_name + 'GPSR_pred.npy')
@@ -529,16 +490,6 @@ def train(trainLoaders, val_loader, model, optimizer, early_stopping, epoch, wei
                         loss = Loss(label.cpu(), pred_original.cpu(), pred_noisy.cpu(), srpred.cpu(), weight=weight)
                     else:
                         loss = Loss(label.cpu(), pred_original.cpu(), pred_noisy.cpu(), srpred.cpu())
-
-                if C.Torch_model_name == 'FIFKT':
-                    data = data.transpose(0, 1).to('cuda')
-                    pred_original = model(data)
-                    data = data.transpose(0, 1)
-                    if batch_idx == len(SRpred) - 1:
-                        loss = Loss(label.cpu(), pred_original.cpu(), y_pred_noisy=None, y_sr=srpred.cpu(),
-                                    weight=weight)
-                    else:
-                        loss = Loss(label.cpu(), pred_original.cpu(), y_pred_noisy=None, y_sr=srpred.cpu())
 
                 if C.Torch_model_name == 'DKT':
                     pred_original = model(data.to('cuda'))
@@ -548,18 +499,15 @@ def train(trainLoaders, val_loader, model, optimizer, early_stopping, epoch, wei
                 loss.backward(retain_graph=True)
                 optimizer.step()
 
-    if C.Training_model == 'Asy-21' and epoch % 2 == 0:
+    if C.Training_model == 'SPsyINN-I' and epoch % 2 == 0:
         num_samples = 1024
-        indices = torch.randperm(Data.size(0))[:num_samples]  # 生成一个随机排列并取前1024个索引
+        indices = torch.randperm(Data.size(0))[:num_samples]  
 
-        Data = Data[indices]  # 使用随机索引抽取样本
+        Data = Data[indices]  
         l = l[indices]
         if C.Torch_model_name == 'DTKT':
             pred_original, pred_noisy = model(Data)
         if C.Torch_model_name == 'DKT':
-            pred_original = model(Data)
-        if C.Torch_model_name == 'FIFKT':
-            Data = Data.transpose(0, 1).to('cuda')
             pred_original = model(Data)
 
         save_DKT_pred(Data, l, pred_original)
@@ -574,17 +522,6 @@ def train(trainLoaders, val_loader, model, optimizer, early_stopping, epoch, wei
                         loss = Loss(label.cpu(), pred_original.cpu(), pred_noisy.cpu(), srpred.cpu(), weight=weight)
                     else:
                         loss = Loss(label.cpu(), pred_original.cpu(), pred_noisy.cpu(), srpred.cpu())
-
-                if C.Torch_model_name == 'FIFKT':
-                    data = data.transpose(0, 1).to('cuda')
-                    pred_original = model(data)
-                    data = data.transpose(0, 1)
-                    if batch_idx == len(SRpred) - 1:
-                        loss = Loss(label.cpu(), pred_original.cpu(), y_pred_noisy=None, y_sr=srpred.cpu(),
-                                    weight=weight)
-                    else:
-                        loss = Loss(label.cpu(), pred_original.cpu(), y_pred_noisy=None, y_sr=srpred.cpu())
-
                 if C.Torch_model_name == 'DKT':
                     pred_original = model(data.to('cuda'))
                     loss = Loss(label.cpu(), pred_original.cpu(), y_pred_noisy=None, y_sr=srpred.cpu())
@@ -609,18 +546,11 @@ def val(val_loader, model, optimizer, early_stopping, min, max):
                 pred_original = model(data)
             if C.Torch_model_name == 'DTKT':
                 pred_original, pred_noisy = model(data)
-            if C.Torch_model_name == 'FIFKT':
-                data = data.transpose(0, 1)
-                pred = model(data)
-                data = data.transpose(0, 1)
 
             if C.Torch_model_name == 'DKT' or C.Torch_model_name == 'TKT':
                 loss = Loss(label.cpu(), pred_original.cpu()).item()
             if C.Torch_model_name == 'DTKT':
                 loss = Loss(label.cpu(), pred_original.cpu(), pred_noisy.cpu()).item()
-            if C.Torch_model_name == 'FIFKT':
-                loss = Loss(label.cpu(), pred.cpu()).item()
-
             val_loss += loss
 
     val_loss /= len(val_loader)
@@ -649,16 +579,10 @@ def test(testLoaders, model, min, max, last=False):
             if C.Torch_model_name == 'DTKT':
                 pred_original, pred_noisy = model(data)
                 loss += Loss(label.cpu(), pred_original.cpu(), pred_noisy.cpu(), None).item()
-            if C.Torch_model_name == 'FIFKT':
-                data = data.transpose(0, 1)
-                pred_original = model(data)
-                loss += Loss(label.cpu(), pred_original.cpu()).item()
-
             count += 1
             prediction = torch.cat([prediction, pred_original.detach()])
             ground_truth = torch.cat([ground_truth, label.detach()])
 
-    # 获取预测值中的最大值
     max_prediction = prediction.max()
     min_prediction = prediction.min()
     average_loss = loss / count
@@ -673,8 +597,6 @@ def test(testLoaders, model, min, max, last=False):
 def save_epoch(epoch, ground_truth, prediction):
     ground_truth = ground_truth.detach().cpu()
     prediction = prediction.detach().cpu()
-    if C.Torch_model_name != 'FIFKT':
-        prediction = prediction[:, -1, :]
 
     mape = masked_mape(prediction, ground_truth)
     mae = masked_mae(prediction, ground_truth)
