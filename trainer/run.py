@@ -22,7 +22,6 @@ else:
     print(f"Unsupported OS: {os_type}")
     exit(1)
 
-# 等待子进程完成
 process1.wait()
 process2.wait()
 
