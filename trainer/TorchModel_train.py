@@ -28,13 +28,6 @@ if __name__ == '__main__':
         model = DTKT(C.INPUT, C.HIDDEN, C.LAYERS, C.OUTPUT).to('cuda')
     if C.Torch_model_name == 'DKT':
         model = DKT(C.INPUT, C.HIDDEN, C.LAYERS, C.OUTPUT).to('cuda')
-    if C.Torch_model_name == 'FIFKT':
-        if 'momo' in C.DATASET:
-            model = FIFAKT(n_question=12326, p_num=20962, embed_l=100, embed_p=64, hidden_dim=50, input_size=6).to(
-                'cuda')
-        else:
-            model = FIFAKT(n_question=12326, p_num=20962, embed_l=100, embed_p=64, hidden_dim=50, input_size=11).to(
-                'cuda')
     seed_everything()
 
     # optimizer = optim.Adagrad(model.parameters(), lr=C.LR)
@@ -60,12 +53,12 @@ if __name__ == '__main__':
         if os.path.exists(C.Dpath + C.DATASET + '/GPSR-time.txt'):
             with open(C.Dpath + C.DATASET + '/GPSR-time.txt', 'r', encoding='utf-8') as f:
                 GPSRtime = f.read()
-            if C.Training_model == 'Asy-11':
+            if C.Training_model == 'SPsyINN-W':
                 if float(GPSRtime) > epoch_time:
                     time.sleep(float(GPSRtime) - epoch_time)
                 else:
                     time.sleep(0)
-            if C.Training_model == 'Asy-21' and epoch % 2 == 0:
+            if C.Training_model == 'SPsyINN-I' and epoch % 2 == 0:
                 if float(GPSRtime) > epoch_time:
                     time.sleep(float(GPSRtime) - epoch_time)
                 else:
