@@ -28,3 +28,8 @@ Additionally, settings like the number of iterations and population size for GSR
 
 - **DNN training** specifics are located in `trainer/TorchModel_train.py`.
 - **GSR training** specifics can be found in `trainer/GPSR_train.py`.
+
+## For Functions performance
+
+We have configured corresponding methods to evaluate equation performance in the `Test for functions` directory for your convenience.
+
