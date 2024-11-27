@@ -7,6 +7,7 @@ from model.Sample_data import save_PYSR_pred
 import warnings
 warnings.filterwarnings("ignore")
 
+# MAE
 def masked_mae(preds, labels, null_val=0):
     with np.errstate(divide='ignore', invalid='ignore'):
         if torch.isnan(torch.tensor(null_val)):
@@ -21,7 +22,7 @@ def masked_mae(preds, labels, null_val=0):
         mae = torch.nan_to_num(mask * mae)
         return torch.mean(mae)
 
-
+# MAPE
 def masked_mape(preds, labels, null_val=0):
     with np.errstate(divide='ignore', invalid='ignore'):
         if torch.isnan(torch.tensor(null_val)):
@@ -37,26 +38,6 @@ def masked_mape(preds, labels, null_val=0):
         mape = torch.nan_to_num(mask * mape)
 
         return torch.mean(mape) * 100
-
-
-def masked_rmse(preds, labels, null_val=0):
-    return torch.sqrt(masked_mse(preds=preds, labels=labels, null_val=0))
-
-
-def masked_mse(preds, labels, null_val=0):
-    with np.errstate(divide='ignore', invalid='ignore'):
-        if torch.isnan(torch.tensor(null_val)):
-            mask = ~torch.isnan(labels)
-        else:
-            mask = labels != null_val
-
-        mask = torch.tensor(mask, dtype=torch.float32)
-        mask /= torch.mean(mask)
-
-        mse = torch.square(preds - labels)
-        mse = torch.nan_to_num(mse * mask)
-        return torch.mean(mse)
-
 
 def performance(ground_truth, prediction):
     mape = masked_mape(prediction, ground_truth)
@@ -115,7 +96,7 @@ class EarlyStopping:
             model = pickle.load(f)
         return model
 
-
+# training
 def train(model, trainLoaders, early_stopping, valLoaders):
     X = torch.Tensor([])
     y = torch.Tensor([])
@@ -158,7 +139,7 @@ def train(model, trainLoaders, early_stopping, valLoaders):
 
     return model
 
-
+# val for early stop
 def val(model, valLoaders):
     X = torch.Tensor([])
     y = torch.Tensor([])
@@ -173,7 +154,7 @@ def val(model, valLoaders):
     val_loss = torch.nn.functional.mse_loss(prediction, y)
     return model, val_loss.item()
 
-
+# test
 def test(model, testLoaders, last=False):
     ground_truth = torch.Tensor([])
     prediction = torch.Tensor([])
