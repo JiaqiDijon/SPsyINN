@@ -6,18 +6,15 @@ from torch.autograd import Variable
 from model.Sample_data import save_DKT_pred
 import model.Constants as C
 import warnings
-import math
-from torch.nn import functional as F
-
 warnings.filterwarnings('ignore')
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 DEBUG = True
 CUDA_LAUNCH_BLOCKING = 1
 
 
-class DKT(nn.Module):
+class DKT_F(nn.Module):
     def __init__(self, input_dim, hidden_dim, layer_dim, output_dim):
-        super(DKT, self).__init__()
+        super(DKT_F, self).__init__()
         self.hidden_dim = hidden_dim
         self.layer_dim = layer_dim
         self.output_dim = output_dim
@@ -48,12 +45,10 @@ class DKT(nn.Module):
 
 
 class DF_block(nn.Module):
-    def __init__(self, input_dim, hidden_dim, num_layers, noise_steps=100, beta_start=1e-3, beta_end=0.2,
-                 dropout_prob=0.2):
+    def __init__(self, input_dim, hidden_dim, noise_steps=100, beta_start=1e-3, beta_end=0.2):
         super(DF_block, self).__init__()
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
-        self.num_layers = num_layers
         self.noise_steps = noise_steps
         self.beta_start = beta_start
         self.beta_end = beta_end
@@ -61,12 +56,6 @@ class DF_block(nn.Module):
         self.beta = self.prepare_noise_schedule()
         self.alpha = 1 - self.beta
         self.alpha_hat = torch.cumprod(self.alpha, dim=0)
-
-        layers = [nn.Linear(input_dim, hidden_dim), nn.ReLU(), nn.Dropout(dropout_prob)]
-        for _ in range(num_layers):
-            layers += [nn.Linear(hidden_dim, hidden_dim), nn.ReLU(), nn.Dropout(dropout_prob)]
-        layers.append(nn.Linear(hidden_dim, input_dim))
-        self.denoise_model = nn.Sequential(*layers)
 
         self.noise_level = nn.Parameter(torch.tensor(0.5))
 
@@ -84,10 +73,10 @@ class DF_block(nn.Module):
         return noisy_data.squeeze(0), noise
 
 
-class DTKT(nn.Module):
+class DNN(nn.Module):
     def __init__(self, input_dim, hidden_dim, layer_dim, output_dim):
-        super(DTKT, self).__init__()
-        self.noise_module = DF_block(input_dim, hidden_dim, num_layers=5)
+        super(DNN, self).__init__()
+        self.noise_module = DF_block(input_dim, hidden_dim)
         self.hidden_dim = hidden_dim
         self.layer_dim = layer_dim
         self.output_dim = output_dim
@@ -112,7 +101,7 @@ class DTKT(nn.Module):
         c0 = Variable(torch.zeros(self.layer_dim, x.shape[0], self.hidden_dim)).to(x.device)
         noisy_data, noise = self.noise_module(x, t=15)
 
-        # original
+        # original data
         original, (h0, c0) = self.rnn(x, (h0, c0))
         original = self.fc(original)  # 64
         out_original = self.out(original)
@@ -120,7 +109,7 @@ class DTKT(nn.Module):
         out_original = self.Linear(out_original + h)
         out_original = self.sig(out_original)
 
-        # noisy
+        # noisy data
         noisy, (h0, c0) = self.rnn(noisy_data, (h0, c0))
         noisy = self.fc(noisy)
         out_noisy = self.out(noisy)
@@ -133,8 +122,9 @@ class DTKT(nn.Module):
 def Loss(y_true, y_pred_original, y_pred_noisy=None, y_sr=None, weight=False):
     maeloss = nn.L1Loss()
     mseloss = nn.MSELoss()
-
-    if C.Torch_model_name in ['DKT']:
+    if "MaiMemo" in C.DATASET:
+        y_true = y_true[:, -1].unsqueeze(-1)
+    if C.Torch_model_name in ['DKT-F']:
         y_pred_original = y_pred_original[:, -1, :]
         if y_sr is not None:
             loss_sr = mseloss(y_pred_original, y_sr)
@@ -153,7 +143,7 @@ def Loss(y_true, y_pred_original, y_pred_noisy=None, y_sr=None, weight=False):
             total_loss = mseloss(y_pred_original, y_true)
         return total_loss
 
-    elif C.Torch_model_name == 'DTKT':
+    elif C.Torch_model_name == 'DNN':
         y_pred_original = y_pred_original[:, -1, :]
         y_pred_noisy = y_pred_noisy[:, -1, :]
 
@@ -240,27 +230,12 @@ def masked_mae(preds, labels, null_val=0):
 
 def performance(ground_truth, prediction):
     ground_truth = ground_truth.detach().cpu()
-    prediction = prediction.detach().cpu()
-
-    if C.Torch_model_name != 'FIFKT':
-        prediction = prediction[:, -1, :]
-
+    if "MaiMemo" in C.DATASET:
+        ground_truth = ground_truth[:, -1].unsqueeze(-1)
+    prediction = prediction.detach().cpu()[:, -1, :]
     mape = masked_mape(prediction, ground_truth)
     mae = masked_mae(prediction, ground_truth)
-    mse = masked_mse(prediction, ground_truth)
-    rmse = masked_rmse(prediction, ground_truth)
-
-    # results.updata(mae.detach(), mse.detach(), mape.detach(), rmse.detach())
-
-    print('  DKT:   MAE:' + str(mae) + ' MAPE: ' + str(mape) + ' MSE: ' + str(mse) + ' RMSE: ' + str(rmse) + '\n')
-
-    result = '  DKT:   MAE:' + str(mae) + ' MAPE: ' + str(mape) + ' MSE: ' + str(mse) + ' RMSE: ' + str(rmse) + '\n' + \
-             '----------------------------------------------------------------------------------\n'
-
-    with open(C.Dpath + C.DATASET + '/DKTresult.txt', 'a+', encoding='utf-8') as f:
-        f.write(result)
-
-    # return results
+    print(f'{C.Torch_model_name}:   MAE:' + str(mae) + ' MAPE: ' + str(mape) + '\n')
 
 
 # Early Stopping Class
@@ -308,31 +283,20 @@ class EarlyStopping:
 
 # Updated training function with early stopping
 def train(trainLoaders, val_loader, model, optimizer, early_stopping, epoch, weight=False):
-    X = torch.tensor([])
-
-    for batch_idx, (data, label) in enumerate(trainLoaders):
-        X = torch.cat((X, data), dim=0)
-
-    min = torch.min(X.reshape(-1, C.INPUT), dim=0).values
-    max = torch.max(X.reshape(-1, C.INPUT), dim=0).values
-
-    del X
-
     model.train()
     epoch_loss = 0
     count = 0
     Data = torch.Tensor([]).to('cuda')
     l = torch.Tensor([]).to('cuda')
     for batch_idx, (data, label) in enumerate(trainLoaders):
-        data = (data - min) / (max - min)
         data = data.to('cuda')
         label = label.to('cuda')
         l2_lambda = 0.0001
         l2_norm = sum(p.pow(2.0).sum() for p in model.parameters())
-        if C.Torch_model_name == 'DKT' or C.Torch_model_name == 'TKT':
+        if C.Torch_model_name == 'DKT-F':
             pred_original = model(data)
             loss = Loss(label.cpu(), pred_original.cpu()) + l2_lambda * l2_norm
-        if C.Torch_model_name == 'DTKT':
+        if C.Torch_model_name == 'DNN':
             pred_original, pred_noisy = model(data)
             pred_original_mask, pred_noisy_mask = pred_original, pred_noisy
             if batch_idx == len(trainLoaders) - 1:
@@ -352,7 +316,7 @@ def train(trainLoaders, val_loader, model, optimizer, early_stopping, epoch, wei
     print(f'Training Loss: {average_loss:.4f}')
 
     # Validate the model and check early stopping
-    model, optimizer, early_stop = val(val_loader, model, optimizer, early_stopping, min, max)
+    model, optimizer, early_stop = val(val_loader, model, optimizer, early_stopping)
     print(f'Validation loss: {early_stopping.val_loss_min:.4f}')
 
     if early_stop:
@@ -366,24 +330,24 @@ def train(trainLoaders, val_loader, model, optimizer, early_stopping, epoch, wei
 
         Data = Data[indices]  
         l = l[indices]
-        if C.Torch_model_name == 'DTKT':
+        if C.Torch_model_name == 'DNN':
             pred_original, pred_noisy = model(Data)
-        if C.Torch_model_name == 'DKT':
+        if C.Torch_model_name == 'DKT-F':
             pred_original = model(Data)
         save_DKT_pred(Data, l, pred_original)
-        if os.path.exists(C.Dpath + C.DATASET + '/' + C.Torch_model_name + 'GPSR_pred.npy'):
-            SRpred = torch.load(C.Dpath + C.DATASET + '/' + C.Torch_model_name + 'GPSR_pred.npy')
+        if os.path.exists(C.Dpath + C.DATASET + '/' + C.Torch_model_name + 'GSR_pred.npy'):
+            SRpred = torch.load(C.Dpath + C.DATASET + '/' + C.Torch_model_name + 'GSR_pred.npy')
             model.train()
             for batch_idx, (data, label, srpred) in enumerate(SRpred):
                 srpred = torch.Tensor(srpred).float()
-                if C.Torch_model_name == 'DTKT':
+                if C.Torch_model_name == 'DNN':
                     pred_original, pred_noisy = model(data.to('cuda'))
                     if batch_idx == len(SRpred) - 1:
                         loss = Loss(label.cpu(), pred_original.cpu(), pred_noisy.cpu(), srpred.cpu(), weight=weight)
                     else:
                         loss = Loss(label.cpu(), pred_original.cpu(), pred_noisy.cpu(), srpred.cpu())
 
-                if C.Torch_model_name == 'DKT':
+                if C.Torch_model_name == 'DKT-F':
                     pred_original = model(data.to('cuda'))
                     loss = Loss(label.cpu(), pred_original.cpu(), y_pred_noisy=None, y_sr=srpred.cpu())
 
@@ -397,24 +361,24 @@ def train(trainLoaders, val_loader, model, optimizer, early_stopping, epoch, wei
 
         Data = Data[indices]  
         l = l[indices]
-        if C.Torch_model_name == 'DTKT':
+        if C.Torch_model_name == 'DNN':
             pred_original, pred_noisy = model(Data)
-        if C.Torch_model_name == 'DKT':
+        if C.Torch_model_name == 'DKT-F':
             pred_original = model(Data)
 
         save_DKT_pred(Data, l, pred_original)
-        if os.path.exists(C.Dpath + C.DATASET + '/' + C.Torch_model_name + 'GPSR_pred.npy'):
-            SRpred = torch.load(C.Dpath + C.DATASET + '/' + C.Torch_model_name + 'GPSR_pred.npy')
+        if os.path.exists(C.Dpath + C.DATASET + '/' + C.Torch_model_name + 'GSR_pred.npy'):
+            SRpred = torch.load(C.Dpath + C.DATASET + '/' + C.Torch_model_name + 'GSR_pred.npy')
             model.train()
             for batch_idx, (data, label, srpred) in enumerate(SRpred):
                 srpred = torch.Tensor(srpred).float()
-                if C.Torch_model_name == 'DTKT':
+                if C.Torch_model_name == 'DNN':
                     pred_original, pred_noisy = model(data.to('cuda'))
                     if batch_idx == len(SRpred) - 1:
                         loss = Loss(label.cpu(), pred_original.cpu(), pred_noisy.cpu(), srpred.cpu(), weight=weight)
                     else:
                         loss = Loss(label.cpu(), pred_original.cpu(), pred_noisy.cpu(), srpred.cpu())
-                if C.Torch_model_name == 'DKT':
+                if C.Torch_model_name == 'DKT-F':
                     pred_original = model(data.to('cuda'))
                     loss = Loss(label.cpu(), pred_original.cpu(), y_pred_noisy=None, y_sr=srpred.cpu())
 
@@ -422,26 +386,25 @@ def train(trainLoaders, val_loader, model, optimizer, early_stopping, epoch, wei
                 loss.backward(retain_graph=True)
                 optimizer.step()
 
-    return model, optimizer, min, max
+    return model, optimizer
 
 
 # Updated validation function
-def val(val_loader, model, optimizer, early_stopping, min, max):
+def val(val_loader, model, optimizer, early_stopping):
     model.eval()
     val_loss = 0.0
     with torch.no_grad():
         for batch_idx, (data, label) in enumerate(val_loader):
-            data = (data - min) / (max - min)
             data = data.to('cuda')
             label = label.to('cuda')
-            if C.Torch_model_name == 'DKT' or C.Torch_model_name == 'TKT':
+            if C.Torch_model_name == 'DKT-F':
                 pred_original = model(data)
-            if C.Torch_model_name == 'DTKT':
+            if C.Torch_model_name == 'DNN':
                 pred_original, pred_noisy = model(data)
 
-            if C.Torch_model_name == 'DKT' or C.Torch_model_name == 'TKT':
+            if C.Torch_model_name == 'DKT-F':
                 loss = Loss(label.cpu(), pred_original.cpu()).item()
-            if C.Torch_model_name == 'DTKT':
+            if C.Torch_model_name == 'DNN':
                 loss = Loss(label.cpu(), pred_original.cpu(), pred_noisy.cpu()).item()
             val_loss += loss
 
@@ -454,7 +417,7 @@ def val(val_loader, model, optimizer, early_stopping, min, max):
 
 
 # Test function remains the same
-def test(testLoaders, model, min, max, last=False):
+def test(testLoaders, model, last=False):
     model.eval()
     ground_truth = torch.Tensor([]).to('cuda')
     prediction = torch.Tensor([]).to('cuda')
@@ -462,38 +425,29 @@ def test(testLoaders, model, min, max, last=False):
     count = 0
     with torch.no_grad():
         for batch_idx, (data, label) in enumerate(testLoaders):
-            data = (data - min) / (max - min)
             data = data.to('cuda')
             label = label.to('cuda')
-            if C.Torch_model_name == 'DKT' or C.Torch_model_name == 'TKT':
+            if C.Torch_model_name == 'DKT-F':
                 pred_original = model(data)
                 loss += Loss(label.cpu(), pred_original.cpu()).item()
-            if C.Torch_model_name == 'DTKT':
+            if C.Torch_model_name == 'DNN':
                 pred_original, pred_noisy = model(data)
                 loss += Loss(label.cpu(), pred_original.cpu(), pred_noisy.cpu(), None).item()
             count += 1
             prediction = torch.cat([prediction, pred_original.detach()])
             ground_truth = torch.cat([ground_truth, label.detach()])
 
-    max_prediction = prediction.max()
-    min_prediction = prediction.min()
-    average_loss = loss / count
-    print(f'Loss: {average_loss:.4f}')
-    print(f'Max prediction: {max_prediction}')
-    print(f'Min prediction: {min_prediction}')
     performance(ground_truth, prediction)
     if last == True:
-        return ground_truth, prediction
+        return ground_truth.cpu(), prediction.cpu()
 
 
 def save_epoch(epoch, ground_truth, prediction):
-    ground_truth = ground_truth.detach().cpu()
-    prediction = prediction.detach().cpu()
-
+    if "MaiMemo" in C.DATASET:
+        ground_truth = ground_truth.detach().cpu()[:, -1].unsqueeze(-1)
+    prediction = prediction.detach().cpu()[:, -1, :]
     mape = masked_mape(prediction, ground_truth)
     mae = masked_mae(prediction, ground_truth)
-    mse = masked_mse(prediction, ground_truth)
-    rmse = masked_rmse(prediction, ground_truth)
-    result = f'{epoch} :   MAE: {mae.item()} MAPE: {mape.item()} MSE: {mse.item()} RMSE: {rmse.item()}\n'
-    with open(C.Dpath + C.DATASET + '/DDKT-epoch.txt', 'a+', encoding='utf-8') as f:
+    result = f'{epoch} :   MAE: {mae.item()} MAPE: {mape.item()}\n'
+    with open(C.Dpath + C.DATASET + '/DNN-epoch.txt', 'a+', encoding='utf-8') as f:
         f.write(result)

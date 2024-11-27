@@ -1,23 +1,23 @@
 Dpath = '../dataset/'
 # dataset path
 datasets = {
-    'momo': 'momo/momo_data', # momo -> MaiMemo
-    'en_to_de': 'duolingo/en_to_de', # en_to_de -> En2De
-    'en_to_es': 'duolingo/en_to_es', # en_to_es -> En2Es
-    'all': 'duolingo/all_data' # all -> Duolingo
+    'MaiMemo': 'MaiMemo/',  # MaiMemo
+    'en_to_de': 'En2De/',  # en_to_de -> En2De
+    'en_to_es': 'En2Es/',  # en_to_es -> En2Es
+    'Duolingo': 'Duolingo/'  # Duolingo
 }
 # dataset
-DATASET = datasets['all']
+DATASET = datasets['Duolingo']
 
 # batch size
 BATCH_SIZE = 256
 
 # Torch model list
-namelist = ['DKT-F', 'DTKT']
-Torch_model_name = 'DTKT'
+namelist = ['DKT-F', 'DNN']
+Torch_model_name = 'DNN'
 
 # learning rate
-if 'momo' in DATASET:
+if 'MaiMemo' in DATASET:
     LR = 0.01
 else:
     LR = 0.001
@@ -26,10 +26,10 @@ else:
 EPOCH = 40
 
 # input dimension
-if 'momo' not in DATASET:
-    INPUT = 11
-else:
+if 'MaiMemo' not in DATASET:
     INPUT = 6
+else:
+    INPUT = 5
 
 # embedding dimension
 EMBED = 100
@@ -49,6 +49,7 @@ functionlist = {'ACTR': 'ACT-R.csv',
                 'ALL': 'ALL.csv',
                 'No': 'NO.csv'}
 Function = 'ALL'
+
 # GSR parameters
 niterations = 40
 populations = 40

@@ -1,72 +1,71 @@
-import numpy as np
-import itertools
-import tqdm
 import torch
 from torch.utils.data.dataset import Dataset
-from torch.utils.data import DataLoader, random_split
 import model.Constants as C
 
-train_ratio = 0.7
-val_ratio = 0.1
-test_ratio = 0.2
+class MyDataste(Dataset):
+    def __init__(self, Data):
+        self.x = Data[:, :, [0, 1, 2, 3, 4, 5, 6, 7]]
+        self.y = Data[:, :, 8]
+
+    def __len__(self):
+        return len(self.x)
+
+    def __getitem__(self, index):
+        return self.x[index], self.y[index]
+
+def normalize_data(data, min_val, max_val):
+    # Avoid division by zero errors.
+    range_val = max_val - min_val
+    range_val[range_val == 0] = 1e-7  # If the range is 0, prevent division by zero.
+    normalized_data = (data - min_val) / range_val
+    return normalized_data
+
+class CustomNormalizedDataLoader(torch.utils.data.DataLoader):
+    def __init__(self, original_loader, min_val, max_val, column_order=None):
+        self.original_loader = original_loader
+        self.min_val = min_val
+        self.max_val = max_val
+        self.column_order = column_order
+
+    def __iter__(self):
+        for data, label in self.original_loader:
+            # Data normalization
+            normalized_data = normalize_data(data, self.min_val, self.max_val)
+
+            # If the order or selection of columns is specified, adjustments are made accordingly.
+            if self.column_order is not None:
+                normalized_data = normalized_data[:, :, self.column_order]
+
+            yield normalized_data, label
+
+    def __len__(self):
+        return len(self.original_loader.dataset)
 
 
-def data_loader(dateSet):
-    train_ratio = 0.7
-    test_ratio = 0.2
-    size = len(dateSet)
-    train_size = int(size * train_ratio)
-    test_size = int(size * test_ratio)
-    val_size = size - train_size - test_size
+def get_min_max(trainLoaders):
+    # Initialize the maximum and minimum values.
+    min_val, max_val = None, None
 
-    train_dataset, val_dataset, test_dataset = random_split(dateSet, [train_size, val_size, test_size])
-    train_loader = DataLoader(train_dataset, batch_size=C.BATCH_SIZE, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=C.BATCH_SIZE, shuffle=False)
-    test_loader = DataLoader(test_dataset, batch_size=C.BATCH_SIZE, shuffle=False)
+    for batch_idx, (data, label) in enumerate(trainLoaders):
+        # Consider only the required dimensions.
+        data_flat = data.reshape(-1, data.shape[2])
 
-    return train_loader, val_loader, test_loader
+        # Calculate the maximum and minimum values of the current batch.
+        batch_min = torch.min(data_flat, dim=0)[0]
+        batch_max = torch.max(data_flat, dim=0)[0]
 
+        # Update the global maximum and minimum values.
+        min_val = batch_min if min_val is None else torch.min(min_val, batch_min)
+        max_val = batch_max if max_val is None else torch.max(max_val, batch_max)
 
-class PredictorDataset(Dataset):
-    def __init__(self, data_path: str, ):
-        datas = np.load(data_path)
-
-        if 'momo' in C.DATASET:
-            self.inputs: np.ndarray = datas['x']
-            self.targets: np.ndarray = datas['y']
-        else:
-            self.inputs: np.ndarray = datas['x'][:, :, [3, 5, 6, 8, 9, 10]]
-            self.targets: np.ndarray = datas['y']
-            self.x: np.ndarray = datas
-        # min = np.min(self.inputs.reshape(-1, 11), axis=0)
-        # max = np.max(self.inputs.reshape(-1, 11), axis=0)
-
-    def __len__(self) -> int:
-        return len(self.inputs)
-
-    def __getitem__(self, idx: int):
-        x, y = self.inputs[idx], self.targets[idx]
-
-        return torch.tensor(x, dtype=torch.float32), torch.tensor(y, dtype=torch.float32)
-
-    def __minmax__(self):
-        min = np.min(self.inputs.reshape(-1, 11), axis=0)
-        max = np.max(self.inputs.reshape(-1, 11), axis=0)
-        return torch.tensor(min, dtype=torch.float32), torch.tensor(max, dtype=torch.float32)
+    return max_val, min_val
 
 
 def getLoader():
-    traindataset = PredictorDataset(C.Dpath + C.DATASET + '/train.npz')
-    testdaraset = PredictorDataset(C.Dpath + C.DATASET + '/test.npz')
-    valdataset = PredictorDataset(C.Dpath + C.DATASET + '/val.npz')
 
-    trainLoaders = DataLoader(traindataset, batch_size=C.BATCH_SIZE, shuffle=True)
-    testLoaders = DataLoader(testdaraset, batch_size=C.BATCH_SIZE, shuffle=False)
-    valLoaders = DataLoader(valdataset, batch_size=C.BATCH_SIZE, shuffle=False)
+    trainLoader = torch.load(C.Dpath + C.DATASET + '/train.npz')
+    testLoader = torch.load(C.Dpath + C.DATASET + '/test.npz')
+    valLoader = torch.load(C.Dpath + C.DATASET + '/val.npz')
 
-    # trainLoaders = torch.load(C.Dpath + C.DATASET + '/train.npy')
-    # testLoaders = torch.load(C.Dpath + C.DATASET + '/test.npy')
-    # valLoaders = torch.load(C.Dpath + C.DATASET + '/val.npy')
-
-    return trainLoaders, testLoaders, valLoaders
+    return trainLoader, testLoader, valLoader
 
