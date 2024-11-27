@@ -1,10 +1,10 @@
 Dpath = '../dataset/'
 # dataset path
 datasets = {
-    'momo': 'momo/momo_data',
-    'en_to_de': 'duolingo/en_to_de',
-    'en_to_es': 'duolingo/en_to_es',
-    'all': 'duolingo/all_data'
+    'momo': 'momo/momo_data', # momo -> MaiMemo
+    'en_to_de': 'duolingo/en_to_de', # en_to_de -> En2De
+    'en_to_es': 'duolingo/en_to_es', # en_to_es -> En2Es
+    'all': 'duolingo/all_data' # all -> Duolingo
 }
 # dataset
 DATASET = datasets['all']
@@ -13,7 +13,7 @@ DATASET = datasets['all']
 BATCH_SIZE = 256
 
 # Torch model list
-namelist = ['DKT', 'DTKT']
+namelist = ['DKT-F', 'DTKT']
 Torch_model_name = 'DTKT'
 
 # learning rate
@@ -40,7 +40,7 @@ LAYERS = 1
 # output dimension
 OUTPUT = 1
 
-# GPSR Functions parameters for init GSR
+# GSR Functions parameters for init GSR
 functionlist = {'ACTR': 'ACT-R.csv',
                 'HLR': 'HLR.csv',
                 'Wickelgren': 'Wickelgren.csv',
@@ -49,6 +49,15 @@ functionlist = {'ACTR': 'ACT-R.csv',
                 'ALL': 'ALL.csv',
                 'No': 'NO.csv'}
 Function = 'ALL'
+# GSR parameters
+niterations = 40
+populations = 40
+population_size = 50
+maxdepth = 4
+binary_operators = ["+", "*", "-", "/", "pow"]
+unary_operators = ["exp", "log"]
+model_selection = "accuracy" # default "accuracy", "score", "best"  refer to PySR
+
 
 # Training parameters, asynchronous wait or no wait, or separate training
 Training_ = ['SPsyINN-C', 'SPsyINN-W', 'SPsyINN-I', 'O-NN']
