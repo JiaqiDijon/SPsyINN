@@ -23,7 +23,7 @@ class NewDataste(torch.utils.data.Dataset):
         self.y = y
         self.z = z
 
-    # z 为DKT或SR的预测标签，用来相互影响
+    # z The prediction labels for DKT or SR, used to influence each other.
     def __getitem__(self, index):
         return self.X[index], self.y[index], self.z[index]
 
