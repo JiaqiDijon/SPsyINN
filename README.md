@@ -32,7 +32,11 @@ The configuration details are located in the `model/Constants.py` file. In this 
 ## Dataset
 
 The `.zip` files in the `dataset` directory contain the data required for training. These files need to be extracted into the `dataset` directory.
-Similarly, to facilitate the symbolic regression process, we have provided corresponding `.csv` files. These files are stored in the `.zip` archive within the `dataset(csv)` directory and must be extracted to access the respective files.
+- To facilitate the validation of symbolic regression, we have organized the corresponding data into CSV files stored in the `dataset(csv)` directory. You need to extract the compressed files in this directory.
+- The data includes (clearly labeled in the CSV files):
+  - $\delta_{1:6}$: Represents user memory features. In the Duolingo, En2De and En2Es dataset, $\delta_{1:6}$ is intact. However, in the MaiMemo dataset, $\delta_3$ was not available, so we retained only $\delta_1, \delta_2, \delta_4, \delta_5, \delta_6$.
+  - $Recall$: Represents memory states.
+
 
 
 ## For Functions performance
