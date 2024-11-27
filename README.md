@@ -8,12 +8,13 @@ In summary, we have, for the first time, integrated machine learning with cognit
 
 ---
 
-# Project Implementation
+## Project Execution
 
-Our project is straightforward to implement. You can execute the `./trainer/run.py` script to run the project.
+Our project is straightforward to implement. You can execute the `./trainer/run.py` script to run the project. 
+
+**Note:** You need to extract the `.zip` files in the `dataset` directory before running the script.
 
 ## Configuration Details
-
 The configuration details are located in the `model/Constants.py` file. In this file, you can modify various parameters:
 
 - **Training dataset**
@@ -21,17 +22,22 @@ The configuration details are located in the `model/Constants.py` file. In this 
 - **Training strategies**
 - Enabling or disabling **Dynamic Asynchronous Optimization (DAO)**
 - Initialization equations for **Genetic Symbolic Regression (GSR)**
-
-Additionally, settings like the number of iterations and population size for GSR can be adjusted in the model initialization section of `trainer/GPSR_train.py`.
+- settings like the number of iterations and population size for GSR
 
 ## Training Details
 
 - **DNN training** specifics are located in `trainer/TorchModel_train.py`.
 - **GSR training** specifics can be found in `trainer/GPSR_train.py`.
 
+## Dataset
+
+The `.zip` files in the `dataset` directory contain the data required for training. These files need to be extracted into the `dataset` directory.
+Similarly, to facilitate the symbolic regression process, we have provided corresponding `.csv` files. These files are stored in the `.zip` archive within the `dataset(csv)` directory and must be extracted to access the respective files.
+
+
 ## For Functions performance
 
 We have configured corresponding methods to evaluate equation performance in the `Test for functions` directory for your convenience.
 
 
-We will further enhance our codebase to make it easier for you to deploy.
+
