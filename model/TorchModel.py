@@ -11,7 +11,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 DEBUG = True
 CUDA_LAUNCH_BLOCKING = 1
 
-
+# DKT-F model
 class DKT_F(nn.Module):
     def __init__(self, input_dim, hidden_dim, layer_dim, output_dim):
         super(DKT_F, self).__init__()
@@ -43,7 +43,7 @@ class DKT_F(nn.Module):
 
         return out
 
-
+# noisy model
 class DF_block(nn.Module):
     def __init__(self, input_dim, hidden_dim, noise_steps=100, beta_start=1e-3, beta_end=0.2):
         super(DF_block, self).__init__()
@@ -72,7 +72,7 @@ class DF_block(nn.Module):
         noisy_data = alpha_t_sqrt * x + noise_t
         return noisy_data.squeeze(0), noise
 
-
+# DNN model
 class DNN(nn.Module):
     def __init__(self, input_dim, hidden_dim, layer_dim, output_dim):
         super(DNN, self).__init__()
@@ -119,6 +119,7 @@ class DNN(nn.Module):
 
         return out_original, out_noisy
 
+# Loss Function
 def Loss(y_true, y_pred_original, y_pred_noisy=None, y_sr=None, weight=False):
     maeloss = nn.L1Loss()
     mseloss = nn.MSELoss()
@@ -177,6 +178,7 @@ def Loss(y_true, y_pred_original, y_pred_noisy=None, y_sr=None, weight=False):
                 print(f'original_weight: {original_weight}, noisy_weight: {noisy_weight}')
         return total_loss
 
+# MAPE
 def masked_mape(preds, labels, null_val=0):
     with np.errstate(divide='ignore', invalid='ignore'):
         if torch.isnan(torch.tensor(null_val)):
@@ -193,26 +195,7 @@ def masked_mape(preds, labels, null_val=0):
 
         return torch.mean(mape) * 100
 
-
-def masked_rmse(preds, labels, null_val=0):
-    return torch.sqrt(masked_mse(preds=preds, labels=labels, null_val=0))
-
-
-def masked_mse(preds, labels, null_val=0):
-    with np.errstate(divide='ignore', invalid='ignore'):
-        if torch.isnan(torch.tensor(null_val)):
-            mask = ~torch.isnan(labels)
-        else:
-            mask = labels != null_val
-
-        mask = torch.tensor(mask, dtype=torch.float32)
-        mask /= torch.mean(mask)
-
-        mse = torch.square(preds - labels)
-        mse = torch.nan_to_num(mse * mask)
-        return torch.mean(mse)
-
-
+# MAE
 def masked_mae(preds, labels, null_val=0):
     with np.errstate(divide='ignore', invalid='ignore'):
         if torch.isnan(torch.tensor(null_val)):
@@ -227,7 +210,7 @@ def masked_mae(preds, labels, null_val=0):
         mae = torch.nan_to_num(mask * mae)
         return torch.mean(mae)
 
-
+# Model Evaluation
 def performance(ground_truth, prediction):
     ground_truth = ground_truth.detach().cpu()
     if "MaiMemo" in C.DATASET:
@@ -280,8 +263,7 @@ class EarlyStopping:
         model = torch.load(self.save_path)
         return model
 
-
-# Updated training function with early stopping
+# training
 def train(trainLoaders, val_loader, model, optimizer, early_stopping, epoch, weight=False):
     model.train()
     epoch_loss = 0
@@ -323,7 +305,7 @@ def train(trainLoaders, val_loader, model, optimizer, early_stopping, epoch, wei
         print("Early stopping")
 
     model.load_state_dict(early_stopping.best_model)
-
+    # DAO:  -W  or -C
     if C.Training_model == 'SPsyINN-W' or C.Training_model == 'SPsyINN-C':
         num_samples = 1024
         indices = torch.randperm(Data.size(0))[:num_samples]  
@@ -354,7 +336,7 @@ def train(trainLoaders, val_loader, model, optimizer, early_stopping, epoch, wei
                 optimizer.zero_grad()
                 loss.backward(retain_graph=True)
                 optimizer.step()
-
+    # DAO:  -I
     if C.Training_model == 'SPsyINN-I' and epoch % 2 == 0:
         num_samples = 1024
         indices = torch.randperm(Data.size(0))[:num_samples]  
@@ -389,7 +371,7 @@ def train(trainLoaders, val_loader, model, optimizer, early_stopping, epoch, wei
     return model, optimizer
 
 
-# Updated validation function
+# val for early stop
 def val(val_loader, model, optimizer, early_stopping):
     model.eval()
     val_loss = 0.0
@@ -416,7 +398,7 @@ def val(val_loader, model, optimizer, early_stopping):
     return model, optimizer, early_stopping.early_stop
 
 
-# Test function remains the same
+# Test
 def test(testLoaders, model, last=False):
     model.eval()
     ground_truth = torch.Tensor([]).to('cuda')
@@ -441,7 +423,7 @@ def test(testLoaders, model, last=False):
     if last == True:
         return ground_truth.cpu(), prediction.cpu()
 
-
+# save result
 def save_epoch(epoch, ground_truth, prediction):
     if "MaiMemo" in C.DATASET:
         ground_truth = ground_truth.detach().cpu()[:, -1].unsqueeze(-1)
