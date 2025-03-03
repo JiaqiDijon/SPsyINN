@@ -119,14 +119,15 @@ class DNN(nn.Module):
 def Loss(y_true, y_pred_original, y_pred_noisy=None, y_sr=None, weight=False):
     maeloss = nn.L1Loss()
     mseloss = nn.MSELoss()
-    if "MaiMemo" in C.DATASET:
-        y_true = y_true[:, -1].unsqueeze(-1)
-    if C.Torch_model_name in ['DKT-F']:
+    bceloss = nn.BCELoss()
+    if 'momo' not in C.DATASET:
+        y_true = y_true.unsqueeze(1)
+    if C.modelname in ['DKT']:
         y_pred_original = y_pred_original[:, -1, :]
         if y_sr is not None:
             loss_sr = mseloss(y_pred_original, y_sr)
             loss_original = mseloss(y_pred_original, y_true)
-            if C.DAO:
+            if C.DyOp:
                 orginal_true_loss = maeloss(y_pred_original, y_true)
                 sr_true_loss = maeloss(y_sr, y_true)
 
@@ -140,81 +141,147 @@ def Loss(y_true, y_pred_original, y_pred_noisy=None, y_sr=None, weight=False):
             total_loss = mseloss(y_pred_original, y_true)
         return total_loss
 
-    elif C.Torch_model_name == 'DNN':
-        y_pred_original = y_pred_original[:, -1, :]
-        y_pred_noisy = y_pred_noisy[:, -1, :]
+    elif C.modelname == 'DTKT':
+        if C.Noisy:
+            y_pred_original = y_pred_original[:, -1, :]
+            y_pred_noisy = y_pred_noisy[:, -1, :]
 
-        loss_original = mseloss(y_pred_original, y_true)
-        loss_pred = mseloss(y_pred_original, y_pred_noisy)
+            loss_original = bceloss(y_pred_original, y_true)
+            loss_pred = mseloss(y_pred_original, y_pred_noisy)
 
-        orginal_true_loss = maeloss(y_pred_original, y_true)
-        noisy_true_loss = maeloss(y_pred_noisy, y_true)
+            orginal_true_loss = mseloss(y_pred_original, y_true)
+            noisy_true_loss = mseloss(y_pred_noisy, y_true)
 
-        if y_sr is not None:
-            loss_sr = mseloss(y_pred_original, y_sr)
-            sr_true_loss = maeloss(y_sr, y_true)
-            if C.DAO:
-                original_weight = (sr_true_loss + noisy_true_loss) / (
-                            sr_true_loss + orginal_true_loss + noisy_true_loss)
-                noisy_weight = (sr_true_loss + orginal_true_loss) / (sr_true_loss + orginal_true_loss + noisy_true_loss)
-                sr_weight = (orginal_true_loss + noisy_true_loss) / (sr_true_loss + orginal_true_loss + noisy_true_loss)
+            if y_sr is not None:
+                loss_sr = mseloss(y_pred_original, y_sr)
+                sr_true_loss = mseloss(y_sr, y_true)
+                if C.DyOp:
+                    original_weight = (sr_true_loss + noisy_true_loss) / (sr_true_loss + orginal_true_loss + noisy_true_loss)
+                    noisy_weight = (sr_true_loss + orginal_true_loss) / (sr_true_loss + orginal_true_loss + noisy_true_loss)
+                    sr_weight = (orginal_true_loss + noisy_true_loss) / (sr_true_loss + orginal_true_loss + noisy_true_loss)
 
-                total_loss = 0.5 * original_weight * loss_original + 0.5 * noisy_weight * loss_pred + 0.5 * sr_weight * loss_sr
-                if weight:
-                    print(
-                        f'original_weight: {original_weight * 0.5}, noisy_weight: {noisy_weight * 0.5}, sr_weight: {sr_weight * 0.5}')
+                    total_loss = 0.5 * original_weight * loss_original + 0.5 * noisy_weight * loss_pred + 0.5 * sr_weight * loss_sr
+                    if weight:
+                        print(
+                            f'original_weight: {original_weight * 0.5}, noisy_weight: {noisy_weight * 0.5}, sr_weight: {sr_weight * 0.5}')
+                else:
+                    total_loss = 0.33 * loss_original + 0.33 * loss_pred + 0.33 * loss_sr
             else:
-                total_loss = 0.33 * loss_original + 0.33 * loss_pred + 0.33 * loss_sr
+                original_weight = noisy_true_loss / (orginal_true_loss + noisy_true_loss)
+                noisy_weight = orginal_true_loss / (orginal_true_loss + noisy_true_loss)
+
+                total_loss = original_weight * loss_original + noisy_weight * loss_pred
+                if weight:
+                    print(f'original_weight: {original_weight}, noisy_weight: {noisy_weight}')
+            return total_loss
+
         else:
-            original_weight = noisy_true_loss / (orginal_true_loss + noisy_true_loss)
-            noisy_weight = orginal_true_loss / (orginal_true_loss + noisy_true_loss)
+            y_pred_original = y_pred_original[:, -1, :]
 
-            total_loss = original_weight * loss_original + noisy_weight * loss_pred
-            if weight:
-                print(f'original_weight: {original_weight}, noisy_weight: {noisy_weight}')
-        return total_loss
+            loss_original = bceloss(y_pred_original, y_true)
+            orginal_true_loss = mseloss(y_pred_original, y_true)
 
-# MAPE
-def masked_mape(preds, labels, null_val=0):
-    with np.errstate(divide='ignore', invalid='ignore'):
-        if torch.isnan(torch.tensor(null_val)):
-            mask = ~torch.isnan(labels)
-        else:
-            mask = labels != null_val
+            if y_sr is not None:
+                loss_sr = mseloss(y_pred_original, y_sr)
+                sr_true_loss = mseloss(y_sr, y_true)
+                if C.DyOp:
+                    original_weight = (sr_true_loss) / (
+                                sr_true_loss + orginal_true_loss)
+                    sr_weight = (orginal_true_loss) / (
+                                sr_true_loss + orginal_true_loss)
 
-        mask = torch.tensor(mask, dtype=torch.float32)
-        mask /= torch.mean(mask)
+                    total_loss =  original_weight * loss_original + sr_weight * loss_sr
+                    if weight:
+                        print(
+                            f'original_weight: {original_weight}, sr_weight: {sr_weight}')
+                else:
+                    total_loss = 0.5 * loss_original + 0.5 * loss_sr
+            else:
+                total_loss = loss_original
+            return total_loss
 
-        # Calculate MAPE
-        mape = torch.abs((preds - labels) / labels)
-        mape = torch.nan_to_num(mask * mape)
+def compute_rmse_in_bins(predictions, targets, num_bins=10):
+    """
+    根据分区间计算加权 RMSE (Root Mean Square Error in Bins)
 
-        return torch.mean(mape) * 100
+    参数:
+    - predictions: 模型的预测值 (torch.Tensor)
+    - targets: 真实标签值 (torch.Tensor)
+    - num_bins: 要划分的区间数 (int)
 
-# MAE
-def masked_mae(preds, labels, null_val=0):
-    with np.errstate(divide='ignore', invalid='ignore'):
-        if torch.isnan(torch.tensor(null_val)):
-            mask = ~torch.isnan(labels)
-        else:
-            mask = labels != null_val
+    返回:
+    - 计算的 RMSE 值 (torch.Tensor)
+    """
+    # 确保预测值和真实值具有相同形状
+    assert predictions.shape == targets.shape, "预测值和真实值的形状必须一致"
+    # 获取预测值的最小值和最大值，作为区间划分的依据
+    min_value = torch.min(predictions).item()
+    max_value = torch.max(predictions).item()
+    # 生成区间的边界
+    bins = torch.linspace(min_value, max_value, num_bins + 1)
+    weighted_sum = 0  # 用于存储公式中的 ∑w_i * (avg_pred - avg_true)^2
+    total_weight = 0  # 用于存储 ∑w_i
+    # 遍历每个区间
+    for i in range(num_bins):
+        # 获取该区间的边界
+        lower_bound = bins[i]
+        upper_bound = bins[i + 1]
+        # 筛选出落在该区间内的预测值和真实值
+        mask = (predictions >= lower_bound) & (predictions < upper_bound)
+        # 如果该区间没有数据，跳过该区间
+        if torch.sum(mask) == 0:
+            continue
+        # 计算该区间内的权重 w_i（即该区间内的样本数）
+        w_i = torch.sum(mask).item()
 
-        mask = torch.tensor(mask, dtype=torch.float32)
-        mask /= torch.mean(mask)
+        # 计算该区间内预测值的平均值和真实值的平均值
+        avg_pred = torch.mean(predictions[mask])
+        avg_true = torch.mean(targets[mask])
 
-        mae = torch.abs(preds - labels)
-        mae = torch.nan_to_num(mask * mae)
-        return torch.mean(mae)
+        # 根据公式计算该区间的加权平方误差
+        weighted_square_error = w_i * (avg_pred - avg_true) ** 2
 
-# Model Evaluation
+        # 更新加权和与总权重
+        weighted_sum += weighted_square_error
+        total_weight += w_i
+    # 计算加权 RMSE
+    if total_weight == 0:  # 如果所有的区间都没有数据
+        return torch.tensor(0.0)
+    rmse = torch.sqrt(weighted_sum / total_weight)
+
+    return rmse
+
+
 def performance(ground_truth, prediction):
     ground_truth = ground_truth.detach().cpu()
-    if "MaiMemo" in C.DATASET:
-        ground_truth = ground_truth[:, -1].unsqueeze(-1)
-    prediction = prediction.detach().cpu()[:, -1, :]
-    mape = masked_mape(prediction, ground_truth)
-    mae = masked_mae(prediction, ground_truth)
-    print(f'{C.Torch_model_name}:   MAE:' + str(mae) + ' MAPE: ' + str(mape) + '\n')
+    prediction = prediction.detach().cpu()[:, -1, :].squeeze(1)
+    if 'momo' in C.DATASET:
+        prediction = prediction.unsqueeze(1)
+    mae = mean_absolute_error(ground_truth, prediction)
+    rmse = root_mean_squared_error(ground_truth, prediction)
+    rmsebin = compute_rmse_in_bins(prediction, ground_truth)
+    mse = mean_squared_error(ground_truth, prediction)
+
+    ground_truth[ground_truth < 1] = 0
+
+    AUC = roc_auc_score(ground_truth, prediction)
+    prediction[prediction < 0.5] = 0
+    prediction[prediction >= 0.5] = 1
+    recall = recall_score(ground_truth, prediction)
+    precision = precision_score(ground_truth, prediction)
+    F1 = f1_score(ground_truth, prediction)
+    acc = accuracy_score(ground_truth, prediction)
+    Precision, Recall, _ = precision_recall_curve(ground_truth, prediction)
+    prauc = auc(Recall, Precision)
+    tn, fp, fn, tp = confusion_matrix(ground_truth, prediction).ravel()
+    Specificity = tn / (tn + fp)
+    Sensitivity = tp / (tp + fn)
+    G_Mean = np.sqrt(Sensitivity * Specificity)
+    result = f'MAE: {mae}, RMSE: {rmse}, RMSE(bin): {rmsebin}, AUC: {AUC}, PrAUC: {prauc}, MSE: {mse}, ACC: {acc}, F1: {F1}, recall: {recall}, ' \
+             f'precision: {precision} Specificity: {Specificity}, Sensitivity: {Sensitivity}, G_Mean: {G_Mean}\n'
+    print(result)
+    with open(C.Dpath + C.DATASET + '/DNN-epoch.txt', 'a+', encoding='utf-8') as f:
+        f.write(result)
 
 
 # Early Stopping Class
@@ -259,7 +326,7 @@ class EarlyStopping:
         model = torch.load(self.save_path)
         return model
 
-# training
+# Updated training function with early stopping
 def train(trainLoaders, val_loader, model, optimizer, early_stopping, epoch, weight=False):
     model.train()
     epoch_loss = 0
@@ -271,17 +338,13 @@ def train(trainLoaders, val_loader, model, optimizer, early_stopping, epoch, wei
         label = label.to('cuda')
         l2_lambda = 0.0001
         l2_norm = sum(p.pow(2.0).sum() for p in model.parameters())
-        if C.Torch_model_name == 'DKT-F':
-            pred_original = model(data)
-            loss = Loss(label.cpu(), pred_original.cpu()) + l2_lambda * l2_norm
-        if C.Torch_model_name == 'DNN':
-            pred_original, pred_noisy = model(data)
-            pred_original_mask, pred_noisy_mask = pred_original, pred_noisy
-            if batch_idx == len(trainLoaders) - 1:
-                loss = Loss(label.cpu(), pred_original_mask.cpu(), pred_noisy_mask.cpu(),
-                            weight=weight) + l2_lambda * l2_norm
-            else:
-                loss = Loss(label.cpu(), pred_original_mask.cpu(), pred_noisy_mask.cpu()) + l2_lambda * l2_norm
+
+        pred_original, pred_noisy = model(data)
+        pred_original_mask, pred_noisy_mask = pred_original, pred_noisy
+        if batch_idx == len(trainLoaders)-1:
+            loss = Loss(label.cpu(), pred_original_mask.cpu(), pred_noisy_mask.cpu(), weight=weight) + l2_lambda * l2_norm
+        else:
+            loss = Loss(label.cpu(), pred_original_mask.cpu(), pred_noisy_mask.cpu()) + l2_lambda * l2_norm
 
         Data = torch.cat((Data, data), dim=0)
         l = torch.cat((l, label), dim=0)
@@ -290,76 +353,55 @@ def train(trainLoaders, val_loader, model, optimizer, early_stopping, epoch, wei
         count += 1
         loss.backward(retain_graph=True)
         optimizer.step()
-    average_loss = epoch_loss / count
+    average_loss = epoch_loss / len(trainLoaders)
     print(f'Training Loss: {average_loss:.4f}')
 
     # Validate the model and check early stopping
     model, optimizer, early_stop = val(val_loader, model, optimizer, early_stopping)
     print(f'Validation loss: {early_stopping.val_loss_min:.4f}')
-
     if early_stop:
         print("Early stopping")
 
     model.load_state_dict(early_stopping.best_model)
-    # DAO:  -W  or -C
-    if C.Training_model == 'SPsyINN-W' or C.Training_model == 'SPsyINN-C':
+    if C.Training_model == 'Asy-11' or C.Training_model == 'Asy-00':
         num_samples = 1024
-        indices = torch.randperm(Data.size(0))[:num_samples]  
-
-        Data = Data[indices]  
+        indices = torch.randperm(Data.size(0))[:num_samples]  # 生成一个随机排列并取前1024个索引
+        Data = Data[indices]  # 使用随机索引抽取样本
         l = l[indices]
-        if C.Torch_model_name == 'DNN':
-            pred_original, pred_noisy = model(Data)
-        if C.Torch_model_name == 'DKT-F':
-            pred_original = model(Data)
+        pred_original, pred_noisy = model(Data)
+
         save_DKT_pred(Data, l, pred_original)
-        if os.path.exists(C.Dpath + C.DATASET + '/' + C.Torch_model_name + 'GSR_pred.npy'):
-            SRpred = torch.load(C.Dpath + C.DATASET + '/' + C.Torch_model_name + 'GSR_pred.npy')
+        if os.path.exists(C.Dpath + C.DATASET + '/' +C.modelname +'GPSR_pred.npy'):
+            SRpred = torch.load(C.Dpath + C.DATASET + '/' +C.modelname +'GPSR_pred.npy')
             model.train()
             for batch_idx, (data, label, srpred) in enumerate(SRpred):
                 srpred = torch.Tensor(srpred).float()
-                if C.Torch_model_name == 'DNN':
-                    pred_original, pred_noisy = model(data.to('cuda'))
-                    if batch_idx == len(SRpred) - 1:
-                        loss = Loss(label.cpu(), pred_original.cpu(), pred_noisy.cpu(), srpred.cpu(), weight=weight)
-                    else:
-                        loss = Loss(label.cpu(), pred_original.cpu(), pred_noisy.cpu(), srpred.cpu())
-
-                if C.Torch_model_name == 'DKT-F':
-                    pred_original = model(data.to('cuda'))
-                    loss = Loss(label.cpu(), pred_original.cpu(), y_pred_noisy=None, y_sr=srpred.cpu())
-
+                pred_original, pred_noisy = model(data.to('cuda'))
+                if batch_idx == len(SRpred)-1:
+                    loss = Loss(label.cpu(), pred_original.cpu(), pred_noisy.cpu(), srpred.cpu(), weight=weight)
+                else:
+                    loss = Loss(label.cpu(), pred_original.cpu(), pred_noisy.cpu(), srpred.cpu())
                 optimizer.zero_grad()
                 loss.backward(retain_graph=True)
                 optimizer.step()
-    # DAO:  -I
-    if C.Training_model == 'SPsyINN-I' and epoch % 2 == 0:
+
+    if C.Training_model == 'Asy-21' and epoch % 2 == 0:
         num_samples = 1024
-        indices = torch.randperm(Data.size(0))[:num_samples]  
-
-        Data = Data[indices]  
+        indices = torch.randperm(Data.size(0))[:num_samples]  # 生成一个随机排列并取前1024个索引
+        Data = Data[indices]  # 使用随机索引抽取样本
         l = l[indices]
-        if C.Torch_model_name == 'DNN':
-            pred_original, pred_noisy = model(Data)
-        if C.Torch_model_name == 'DKT-F':
-            pred_original = model(Data)
-
+        pred_original, pred_noisy = model(Data)
         save_DKT_pred(Data, l, pred_original)
-        if os.path.exists(C.Dpath + C.DATASET + '/' + C.Torch_model_name + 'GSR_pred.npy'):
-            SRpred = torch.load(C.Dpath + C.DATASET + '/' + C.Torch_model_name + 'GSR_pred.npy')
+        if os.path.exists(C.Dpath + C.DATASET + '/' +C.modelname +'GPSR_pred.npy'):
+            SRpred = torch.load(C.Dpath + C.DATASET + '/' +C.modelname +'GPSR_pred.npy')
             model.train()
             for batch_idx, (data, label, srpred) in enumerate(SRpred):
                 srpred = torch.Tensor(srpred).float()
-                if C.Torch_model_name == 'DNN':
-                    pred_original, pred_noisy = model(data.to('cuda'))
-                    if batch_idx == len(SRpred) - 1:
-                        loss = Loss(label.cpu(), pred_original.cpu(), pred_noisy.cpu(), srpred.cpu(), weight=weight)
-                    else:
-                        loss = Loss(label.cpu(), pred_original.cpu(), pred_noisy.cpu(), srpred.cpu())
-                if C.Torch_model_name == 'DKT-F':
-                    pred_original = model(data.to('cuda'))
-                    loss = Loss(label.cpu(), pred_original.cpu(), y_pred_noisy=None, y_sr=srpred.cpu())
-
+                pred_original, pred_noisy = model(data.to('cuda'))
+                if batch_idx == len(SRpred) - 1:
+                    loss = Loss(label.cpu(), pred_original.cpu(), pred_noisy.cpu(), srpred.cpu(), weight=weight)
+                else:
+                    loss = Loss(label.cpu(), pred_original.cpu(), pred_noisy.cpu(), srpred.cpu())
                 optimizer.zero_grad()
                 loss.backward(retain_graph=True)
                 optimizer.step()
@@ -367,7 +409,8 @@ def train(trainLoaders, val_loader, model, optimizer, early_stopping, epoch, wei
     return model, optimizer
 
 
-# val for early stop
+
+# Updated validation function
 def val(val_loader, model, optimizer, early_stopping):
     model.eval()
     val_loss = 0.0
@@ -375,26 +418,17 @@ def val(val_loader, model, optimizer, early_stopping):
         for batch_idx, (data, label) in enumerate(val_loader):
             data = data.to('cuda')
             label = label.to('cuda')
-            if C.Torch_model_name == 'DKT-F':
-                pred_original = model(data)
-            if C.Torch_model_name == 'DNN':
-                pred_original, pred_noisy = model(data)
-
-            if C.Torch_model_name == 'DKT-F':
-                loss = Loss(label.cpu(), pred_original.cpu()).item()
-            if C.Torch_model_name == 'DNN':
-                loss = Loss(label.cpu(), pred_original.cpu(), pred_noisy.cpu()).item()
+            pred_original, pred_noisy = model(data)
+            loss = Loss(label.cpu(), pred_original.cpu(), pred_noisy.cpu()).item()
             val_loss += loss
-
     val_loss /= len(val_loader)
-
     # Check early stopping condition
     early_stopping(val_loss, model)
 
     return model, optimizer, early_stopping.early_stop
 
 
-# Test
+# Test function remains the same
 def test(testLoaders, model, last=False):
     model.eval()
     ground_truth = torch.Tensor([]).to('cuda')
@@ -405,27 +439,52 @@ def test(testLoaders, model, last=False):
         for batch_idx, (data, label) in enumerate(testLoaders):
             data = data.to('cuda')
             label = label.to('cuda')
-            if C.Torch_model_name == 'DKT-F':
-                pred_original = model(data)
-                loss += Loss(label.cpu(), pred_original.cpu()).item()
-            if C.Torch_model_name == 'DNN':
-                pred_original, pred_noisy = model(data)
-                loss += Loss(label.cpu(), pred_original.cpu(), pred_noisy.cpu(), None).item()
+            pred_original, pred_noisy = model(data)
+            loss += Loss(label.cpu(), pred_original.cpu(), pred_noisy.cpu(), None).item()
             count += 1
             prediction = torch.cat([prediction, pred_original.detach()])
             ground_truth = torch.cat([ground_truth, label.detach()])
 
+    # 获取预测值中的最大值
+    max_prediction = prediction.max()
+    min_prediction = prediction.min()
+    average_loss = loss / count
+    print(f'Loss: {average_loss:.4f}')
+    print(f'Max prediction: {max_prediction}')
+    print(f'Min prediction: {min_prediction}')
     performance(ground_truth, prediction)
+    ones_tensor = torch.ones_like(prediction)
+    zeros_tensor = torch.zeros_like(prediction)
+    print('One data _____________________: ')
+    performance(ground_truth, ones_tensor)
+    print('Zero data _____________________: ')
+    performance(ground_truth, zeros_tensor)
     if last == True:
-        return ground_truth.cpu(), prediction.cpu()
+        return ground_truth, prediction
 
-# save result
+
+
 def save_epoch(epoch, ground_truth, prediction):
-    if "MaiMemo" in C.DATASET:
+    if "momo" in C.DATASET:
         ground_truth = ground_truth.detach().cpu()[:, -1].unsqueeze(-1)
     prediction = prediction.detach().cpu()[:, -1, :]
-    mape = masked_mape(prediction, ground_truth)
-    mae = masked_mae(prediction, ground_truth)
-    result = f'{epoch} :   MAE: {mae.item()} MAPE: {mape.item()}\n'
+
+    mae = mean_absolute_error(ground_truth, prediction)
+    rmse = root_mean_squared_error(ground_truth, prediction)
+    rmsebin = compute_rmse_in_bins(prediction, ground_truth)
+    mse = mean_squared_error(ground_truth, prediction)
+
+    ground_truth[ground_truth < 1] = 0
+    AUC = roc_auc_score(ground_truth, prediction)
+    prediction[prediction < 0.5] = 0
+    prediction[prediction >= 0.5] = 1
+    recall = recall_score(ground_truth, prediction)
+    precision = precision_score(ground_truth, prediction)
+    F1 = f1_score(ground_truth, prediction)
+    acc = accuracy_score(ground_truth, prediction)
+    Precision, Recall, _ = precision_recall_curve(ground_truth, prediction)
+    prauc = auc(Recall, Precision)
+
+    result = f'epoch: {epoch}  MAE: {mae}, RMSE: {rmse}, RMSE(bin): {rmsebin}, AUC: {AUC}, PrAUC: {prauc}, MSE: {mse}, ACC: {acc}, F1: {F1}, recall: {recall}, precision: {precision}\n'
     with open(C.Dpath + C.DATASET + '/DNN-epoch.txt', 'a+', encoding='utf-8') as f:
         f.write(result)
