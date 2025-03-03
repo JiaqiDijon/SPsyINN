@@ -11,38 +11,6 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 DEBUG = True
 CUDA_LAUNCH_BLOCKING = 1
 
-# DKT-F model
-class DKT_F(nn.Module):
-    def __init__(self, input_dim, hidden_dim, layer_dim, output_dim):
-        super(DKT_F, self).__init__()
-        self.hidden_dim = hidden_dim
-        self.layer_dim = layer_dim
-        self.output_dim = output_dim
-        self.rnn = nn.LSTM(input_dim, hidden_dim, layer_dim, batch_first=True, dropout=0.1)
-        self.fc = nn.Linear(64, 64)
-        self.out = nn.Sequential(
-            nn.Linear(64, 128),
-            nn.Tanh(),
-            nn.Dropout(0.2),
-            nn.Linear(128, 64),
-            nn.Tanh(),
-            nn.Dropout(0.2)
-        )
-        self.Linear = nn.Linear(64, self.output_dim)
-        self.sig = nn.Sigmoid()
-
-    def forward(self, x):
-        h0 = Variable(torch.zeros(self.layer_dim, x.shape[0], self.hidden_dim)).to(x.device)
-        c0 = Variable(torch.zeros(self.layer_dim, x.shape[0], self.hidden_dim)).to(x.device)
-        rnn_out, (h0, c0) = self.rnn(x, (h0, c0))
-        out = self.fc(rnn_out)
-        out = self.out(out)
-        h = h0[-1:, :, :].permute(1, 0, 2)
-        out = self.Linear(out + h)
-        out = self.sig(out)
-
-        return out
-
 # noisy model
 class DF_block(nn.Module):
     def __init__(self, input_dim, hidden_dim, noise_steps=100, beta_start=1e-3, beta_end=0.2):
@@ -76,21 +44,29 @@ class DF_block(nn.Module):
 class DNN(nn.Module):
     def __init__(self, input_dim, hidden_dim, layer_dim, output_dim):
         super(DNN, self).__init__()
-        self.noise_module = DF_block(input_dim, hidden_dim)
+        self.noise_module = DF_block(input_dim, hidden_dim, num_layers=5)
         self.hidden_dim = hidden_dim
         self.layer_dim = layer_dim
         self.output_dim = output_dim
-        self.rnn = nn.LSTM(input_dim, hidden_dim, layer_dim, batch_first=True, dropout=0.3)
-        self.fc = nn.Linear(64, 64)
+        self.q_emb = nn.Embedding(12326, 64)
+        self.p_emb = nn.Embedding(20962, 64)
+        self.a_emb = nn.Embedding(2, 64)
+
+        # self.rnn = nn.LSTM(input_dim + 128, hidden_dim, layer_dim, batch_first=True, dropout=0.3)
+        if 'momo' in C.DATASET:
+            self.rnn = nn.LSTM(192 + 6, hidden_dim, layer_dim, batch_first=True, dropout=0.3)
+        else:
+            self.rnn = nn.LSTM(192 + 6, hidden_dim, layer_dim, batch_first=True, dropout=0.3)
+
+        self.Linear = nn.Linear(64, 64)
+
         self.out = nn.Sequential(
-            nn.Linear(64, 128),
+            nn.Linear(64, 10),
             nn.Tanh(),
             nn.Dropout(0.3),
-            nn.Linear(128, 64),
-            nn.Tanh(),
-            nn.Dropout(0.3)
+            nn.Linear(10, 1)
         )
-        self.Linear = nn.Linear(64, self.output_dim)
+
         self.sig = nn.Sigmoid()
         self.tanh = nn.Tanh()
 
@@ -99,22 +75,42 @@ class DNN(nn.Module):
     def forward(self, x):
         h0 = Variable(torch.zeros(self.layer_dim, x.shape[0], self.hidden_dim)).to(x.device)
         c0 = Variable(torch.zeros(self.layer_dim, x.shape[0], self.hidden_dim)).to(x.device)
-        noisy_data, noise = self.noise_module(x, t=15)
+        if 'momo' in C.DATASET:
+            xnew = x
+            a_data = x[:, :, 5].unsqueeze(-1)
+            q_data = x[:, :, 0].unsqueeze(-1)
+            p_data = x[:, :, 0].unsqueeze(-1)
+        else:
+            xnew = x[:, :, [3, 5, 6, 8, 9, 10]]
+            q_data = x[:, :, 4].unsqueeze(-1)
+            p_data = x[:, :, 0].unsqueeze(-1)
+            a_data = x[:, :, 1].unsqueeze(-1)
 
-        # original data
-        original, (h0, c0) = self.rnn(x, (h0, c0))
-        original = self.fc(original)  # 64
-        out_original = self.out(original)
+        noisy_data, noise = self.noise_module(xnew, t=10)
+
+        # word embeding
+        q_embed_data = self.q_emb(q_data.to(dtype=torch.long)).squeeze()
+        # user embeding
+        p_embed_data = self.p_emb(p_data.to(dtype=torch.long)).squeeze()
+
+        # ans embeding
+        a_embed_data = self.a_emb(a_data.to(dtype=torch.long)).squeeze()
+
+
+        # 对原始数据的预测
+        original_data = torch.cat([q_embed_data, p_embed_data, a_embed_data, xnew], dim=2)
+        original, (h0, c0) = self.rnn(original_data, (h0, c0))
         h = h0[-1:, :, :].permute(1, 0, 2)
-        out_original = self.Linear(out_original + h)
+        original = self.Linear(original + h)
+        out_original = self.out(original)
         out_original = self.sig(out_original)
 
-        # noisy data
+        # 对添加噪声数据的预测
+        noisy_data = torch.cat([q_embed_data, p_embed_data, a_embed_data, noisy_data], dim=2)
         noisy, (h0, c0) = self.rnn(noisy_data, (h0, c0))
-        noisy = self.fc(noisy)
-        out_noisy = self.out(noisy)
         h = h0[-1:, :, :].permute(1, 0, 2)
-        out_noisy = self.Linear(out_noisy + h)
+        noisy = self.Linear(noisy + h)
+        out_noisy = self.out(noisy)
         out_noisy = self.sig(out_noisy)
 
         return out_original, out_noisy
