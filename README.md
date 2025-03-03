@@ -17,6 +17,16 @@ The `.zip` files in the `dataset` directory contain the data required for traini
 
 ## Project Execution
 
+## Quick Start
+### Environment Configuration
+```bash
+conda create -n spsyinn python=3.8
+conda activate spsyinn
+pip install -r requirements.txt
+
+
+
+
 Our project is straightforward to implement. You can execute the `./trainer/run.py` script to run the project. 
 
 **Note:** You need to extract the `.zip` files in the `dataset` directory before running the script.
